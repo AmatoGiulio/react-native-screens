@@ -10,7 +10,7 @@ import androidx.core.view.ViewCompat
  * CoordinatorLayout that preserves its normal child-behavior dispatch and optionally forwards
  * the remaining nested-scroll transaction to an external screen delegate.
  */
-abstract class ScreenNestedScrollCoordinatorLayout(
+internal abstract class ScreenNestedScrollCoordinatorLayout(
     context: Context,
     private val screen: ViewGroup,
 ) : CoordinatorLayout(context) {
