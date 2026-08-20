@@ -18,6 +18,9 @@ internal abstract class ScreenNestedScrollCoordinatorLayout(
     private val superAcceptedTypes = mutableSetOf<Int>()
     private val delegateAcceptedTypes = mutableSetOf<Int>()
 
+    override fun getNestedScrollAxes(): Int =
+        super.getNestedScrollAxes() or (nestedScrollDelegate?.getNestedScrollAxes() ?: 0)
+
     override fun onStartNestedScroll(
         child: View,
         target: View,
