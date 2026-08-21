@@ -50,6 +50,8 @@ type ProbeModule = {
   snapshot(): Promise<ProbeSnapshot>;
 };
 
+type ProbeMode = 'disabled' | 'observe' | 'consume';
+
 const probe = NativeModules.NestedScrollInteropTest as ProbeModule;
 
 const HEADER_CONFIG: StackHeaderConfigProps = {
@@ -101,21 +103,19 @@ function TestStackNestedScrollInteropAndroid() {
 function ProbeScreen({ label }: { label: string }) {
   const { routeKey, setRouteOptions, push } = useStackNavigationContext();
   const [snapshot, setSnapshot] = useState<ProbeSnapshot | null>(null);
-  const [mode, setMode] = useState<'observe' | 'consume'>('observe');
+  const [mode, setMode] = useState<ProbeMode>('observe');
 
   useEffect(() => {
     setRouteOptions(routeKey, { headerConfig: HEADER_CONFIG });
   }, [routeKey, setRouteOptions]);
 
-  const configure = useCallback(
-    async (nextMode: 'observe' | 'consume') => {
-      await probe.configure(true, nextMode === 'consume');
-      await probe.reset();
-      setMode(nextMode);
-      setSnapshot(null);
-    },
-    [],
-  );
+  const configure = useCallback(async (nextMode: ProbeMode) => {
+    const enabled = nextMode !== 'disabled';
+    await probe.configure(enabled, nextMode === 'consume');
+    await probe.reset();
+    setMode(nextMode);
+    setSnapshot(null);
+  }, []);
 
   const reset = useCallback(async () => {
     await probe.reset();
@@ -146,6 +146,11 @@ function ProbeScreen({ label }: { label: string }) {
             testID="nested-scroll-probe-consume"
             title="Consume remaining"
             onPress={() => void configure('consume')}
+          />
+          <Button
+            testID="nested-scroll-probe-disable"
+            title="Disable"
+            onPress={() => void configure('disabled')}
           />
           <Button
             testID="nested-scroll-probe-reset"
