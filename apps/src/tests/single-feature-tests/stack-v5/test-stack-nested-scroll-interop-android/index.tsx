@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   Button,
   NativeModules,
@@ -52,6 +52,8 @@ type ProbeModule = {
 };
 
 type ProbeMode = 'disabled' | 'observe' | 'consume';
+type ProbeScreenLabel = 'Home' | 'Details' | 'Nested';
+type SnapshotState = 'idle' | 'requesting' | 'resolved' | 'rejected';
 
 const probe = NativeModules.NestedScrollInteropTest as ProbeModule;
 
@@ -69,6 +71,10 @@ const OUTER_NESTED_HEADER_CONFIG: StackHeaderConfigProps = {
   ...HEADER_CONFIG,
   title: 'Outer nested header',
 };
+
+function probePrefix(label: ProbeScreenLabel) {
+  return `nested-scroll-probe-${label.toLowerCase()}`;
+}
 
 function TestStackNestedScrollInteropAndroid() {
   const [ready, setReady] = useState(false);
@@ -130,12 +136,14 @@ function ProbeScreen({
   label,
   headerEnabled = true,
 }: {
-  label: string;
+  label: ProbeScreenLabel;
   headerEnabled?: boolean;
 }) {
   const { routeKey, setRouteOptions, push } = useStackNavigationContext();
   const [snapshot, setSnapshot] = useState<ProbeSnapshot | null>(null);
+  const [snapshotState, setSnapshotState] = useState<SnapshotState>('idle');
   const [mode, setMode] = useState<ProbeMode>('observe');
+  const prefix = probePrefix(label);
 
   useEffect(() => {
     setRouteOptions(routeKey, {
@@ -143,57 +151,97 @@ function ProbeScreen({
     });
   }, [headerEnabled, routeKey, setRouteOptions]);
 
-  const configure = useCallback(async (nextMode: ProbeMode) => {
-    const enabled = nextMode !== 'disabled';
-    await probe.configure(enabled, nextMode === 'consume');
-    await probe.reset();
-    setMode(nextMode);
+  const clearSnapshot = useCallback(() => {
     setSnapshot(null);
+    setSnapshotState('idle');
   }, []);
+
+  const configure = useCallback(
+    async (nextMode: ProbeMode) => {
+      const enabled = nextMode !== 'disabled';
+      await probe.configure(enabled, nextMode === 'consume');
+      await probe.reset();
+      setMode(nextMode);
+      clearSnapshot();
+    },
+    [clearSnapshot],
+  );
 
   const reset = useCallback(async () => {
     await probe.reset();
-    setSnapshot(null);
-  }, []);
+    clearSnapshot();
+  }, [clearSnapshot]);
 
   const refreshSnapshot = useCallback(async () => {
     setSnapshot(null);
-    setSnapshot(await probe.snapshot());
+    setSnapshotState('requesting');
+    try {
+      const nextSnapshot = await probe.snapshot();
+      setSnapshot(nextSnapshot);
+      setSnapshotState('resolved');
+    } catch {
+      setSnapshotState('rejected');
+    }
   }, []);
 
-  const snapshotText = useMemo(
-    () => (snapshot == null ? 'none' : JSON.stringify(snapshot)),
-    [snapshot],
-  );
+  const identityText =
+    snapshot == null
+      ? 'none'
+      : [
+          snapshot.sequence,
+          snapshot.lastScreenClass,
+          snapshot.lastScreenId,
+          snapshot.lastTargetClass,
+          snapshot.lastTargetId,
+          snapshot.lastTargetScrollY,
+        ].join('|');
+  const eventText =
+    snapshot == null
+      ? 'none'
+      : [
+          snapshot.touchStarts,
+          snapshot.nonTouchStarts,
+          snapshot.touchPre,
+          snapshot.nonTouchPre,
+          snapshot.touchPost,
+          snapshot.nonTouchPost,
+        ].join('|');
+  const consumptionText =
+    snapshot == null
+      ? 'none'
+      : [
+          snapshot.delegateConsumedPreY,
+          snapshot.delegateConsumedPostY,
+        ].join('|');
 
   return (
     <View style={styles.screen}>
       <View style={styles.probePanel}>
-        <Text testID="nested-scroll-probe-route">{label}</Text>
-        <Text testID="nested-scroll-probe-mode">{mode}</Text>
+        <Text testID={`${prefix}-route`}>{label}</Text>
+        <Text testID={`${prefix}-mode`}>{mode}</Text>
         <View style={styles.buttonRow}>
           <Button
-            testID="nested-scroll-probe-observe"
+            testID={`${prefix}-observe`}
             title="Observe"
             onPress={() => void configure('observe')}
           />
           <Button
-            testID="nested-scroll-probe-consume"
+            testID={`${prefix}-consume`}
             title="Consume remaining"
             onPress={() => void configure('consume')}
           />
           <Button
-            testID="nested-scroll-probe-disable"
+            testID={`${prefix}-disable`}
             title="Disable"
             onPress={() => void configure('disabled')}
           />
           <Button
-            testID="nested-scroll-probe-reset"
+            testID={`${prefix}-reset`}
             title="Reset"
             onPress={() => void reset()}
           />
           <Button
-            testID="nested-scroll-probe-snapshot-button"
+            testID={`${prefix}-snapshot-button`}
             title="Snapshot"
             onPress={() => void refreshSnapshot()}
           />
@@ -201,36 +249,42 @@ function ProbeScreen({
         {label === 'Home' ? (
           <View style={styles.buttonRow}>
             <Button
-              testID="nested-scroll-probe-push"
+              testID={`${prefix}-push`}
               title="Push details"
               onPress={() => push('Details')}
             />
             <Button
-              testID="nested-scroll-probe-push-nested"
+              testID={`${prefix}-push-nested`}
               title="Push nested stack"
               onPress={() => push('Nested')}
             />
           </View>
         ) : null}
-        <Text
-          testID="nested-scroll-probe-snapshot"
-          numberOfLines={1}
-          style={styles.snapshot}>
-          {snapshotText}
+        <Text testID={`${prefix}-snapshot-status`} style={styles.snapshot}>
+          {snapshotState}
+        </Text>
+        <Text testID={`${prefix}-snapshot-identity`} style={styles.snapshot}>
+          {identityText}
+        </Text>
+        <Text testID={`${prefix}-snapshot-events`} style={styles.snapshot}>
+          {eventText}
+        </Text>
+        <Text testID={`${prefix}-snapshot-consumption`} style={styles.snapshot}>
+          {consumptionText}
         </Text>
       </View>
 
       <ScrollViewMarker style={styles.scrollViewMarker}>
         <ScrollView
-          testID="nested-scroll-probe-scrollview"
+          testID={`${prefix}-scrollview`}
           nestedScrollEnabled
           style={styles.scroll}
           contentContainerStyle={styles.content}>
-          <Text testID="nested-scroll-probe-top" style={styles.heading}>
+          <Text testID={`${prefix}-top`} style={styles.heading}>
             {label} content top
           </Text>
           <LongText size="xl" />
-          <Text testID="nested-scroll-probe-bottom">{label} content bottom</Text>
+          <Text testID={`${prefix}-bottom`}>{label} content bottom</Text>
         </ScrollView>
       </ScrollViewMarker>
     </View>
