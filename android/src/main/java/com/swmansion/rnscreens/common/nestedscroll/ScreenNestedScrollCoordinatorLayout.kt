@@ -17,6 +17,7 @@ internal abstract class ScreenNestedScrollCoordinatorLayout(
     private val nestedScrollDelegate = ScreenNestedScrollInterop.createDelegate(screen)
     private val superAcceptedTypes = mutableSetOf<Int>()
     private val delegateAcceptedTypes = mutableSetOf<Int>()
+    private val delegateConsumed = IntArray(2)
 
     override fun getNestedScrollAxes(): Int = super.getNestedScrollAxes() or (nestedScrollDelegate?.getNestedScrollAxes() ?: 0)
 
@@ -82,7 +83,7 @@ internal abstract class ScreenNestedScrollCoordinatorLayout(
             val consumedBySuperY = consumed[1] - consumedBeforeY
             val remainingX = dx - consumedBySuperX
             val remainingY = dy - consumedBySuperY
-            val delegateConsumed = IntArray(2)
+            delegateConsumed.fill(0)
 
             nestedScrollDelegate?.onNestedPreScroll(
                 target,
@@ -92,8 +93,8 @@ internal abstract class ScreenNestedScrollCoordinatorLayout(
                 type,
             )
 
-            consumed[0] += delegateConsumed[0]
-            consumed[1] += delegateConsumed[1]
+            consumed[0] += clampSignedConsumption(remainingX, delegateConsumed[0])
+            consumed[1] += clampSignedConsumption(remainingY, delegateConsumed[1])
         }
     }
 
@@ -126,7 +127,7 @@ internal abstract class ScreenNestedScrollCoordinatorLayout(
             val consumedBySuperY = consumed[1] - consumedBeforeY
             val remainingX = dxUnconsumed - consumedBySuperX
             val remainingY = dyUnconsumed - consumedBySuperY
-            val delegateConsumed = IntArray(2)
+            delegateConsumed.fill(0)
 
             nestedScrollDelegate?.onNestedScroll(
                 target,
@@ -138,8 +139,8 @@ internal abstract class ScreenNestedScrollCoordinatorLayout(
                 delegateConsumed,
             )
 
-            consumed[0] += delegateConsumed[0]
-            consumed[1] += delegateConsumed[1]
+            consumed[0] += clampSignedConsumption(remainingX, delegateConsumed[0])
+            consumed[1] += clampSignedConsumption(remainingY, delegateConsumed[1])
         }
     }
 
@@ -169,11 +170,13 @@ internal abstract class ScreenNestedScrollCoordinatorLayout(
         val handledBySuper =
             ViewCompat.TYPE_TOUCH in superAcceptedTypes &&
                 super.onNestedFling(target, velocityX, velocityY, consumed)
-        val handledByDelegate =
-            ViewCompat.TYPE_TOUCH in delegateAcceptedTypes &&
-                nestedScrollDelegate?.onNestedFling(target, velocityX, velocityY, consumed) == true
 
-        return handledBySuper || handledByDelegate
+        if (handledBySuper) {
+            return true
+        }
+
+        return ViewCompat.TYPE_TOUCH in delegateAcceptedTypes &&
+            nestedScrollDelegate?.onNestedFling(target, velocityX, velocityY, consumed) == true
     }
 
     override fun onAttachedToWindow() {
@@ -198,4 +201,14 @@ internal abstract class ScreenNestedScrollCoordinatorLayout(
         super.onLayout(changed, left, top, right, bottom)
         nestedScrollDelegate?.onScreenLayout(screen)
     }
+
+    private fun clampSignedConsumption(
+        available: Int,
+        consumed: Int,
+    ): Int =
+        when {
+            available > 0 -> consumed.coerceIn(0, available)
+            available < 0 -> consumed.coerceIn(available, 0)
+            else -> 0
+        }
 }
