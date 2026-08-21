@@ -31,6 +31,7 @@ class NestedScrollInteropTestModule(
     fun snapshot(promise: Promise) {
         val snapshot = NestedScrollInteropTestProbe.snapshot()
         val map = Arguments.createMap().apply {
+            putDouble("sequence", snapshot.sequence.toDouble())
             putInt("delegatesCreated", snapshot.delegatesCreated)
             putInt("attached", snapshot.attached)
             putInt("detached", snapshot.detached)
