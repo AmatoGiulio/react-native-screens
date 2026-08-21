@@ -25,11 +25,20 @@ const toolbar = by.type(CLASS_NAME_ANDROID_MATERIAL_TOOLBAR);
 const appBar = by
   .type(CLASS_NAME_ANDROID_APP_BAR_LAYOUT)
   .withDescendant(toolbar);
+const outerNestedAppBar = by
+  .type(CLASS_NAME_ANDROID_APP_BAR_LAYOUT)
+  .withDescendant(by.text('Outer nested header'));
 
 let lastSnapshotSequence = 0;
 
 async function appBarAttributes(): Promise<AndroidElementAttributes> {
   const matches = await getMatches(appBar);
+  jestExpect(matches).toHaveLength(1);
+  return matches[0] as AndroidElementAttributes;
+}
+
+async function outerNestedAppBarAttributes(): Promise<AndroidElementAttributes> {
+  const matches = await getMatches(outerNestedAppBar);
   jestExpect(matches).toHaveLength(1);
   return matches[0] as AndroidElementAttributes;
 }
@@ -79,7 +88,7 @@ async function setMode(mode: 'observe' | 'consume' | 'disabled') {
   await waitFor(element(by.id(MODE))).toHaveText(mode).withTimeout(3000);
 }
 
-async function waitForRoute(route: 'Home' | 'Details') {
+async function waitForRoute(route: 'Home' | 'Details' | 'Nested') {
   await waitFor(element(by.id(ROUTE))).toHaveText(route).withTimeout(5000);
 }
 
@@ -160,6 +169,38 @@ describeIfAndroid('Stack v5: nested-scroll interop seam (Android)', () => {
 
     jestExpect(restoredHome.lastScreenId).toBe(home.lastScreenId);
     jestExpect(restoredHome.lastTargetId).toBe(home.lastTargetId);
+  });
+
+  it('preserves an outer Stack v5 header when the delegate accepts an inner stack source', async () => {
+    await setMode('observe');
+    await scrollToTop();
+    await element(by.id('nested-scroll-probe-push-nested')).tap();
+    await waitForRoute('Nested');
+    await waitFor(element(by.text('Outer nested header')))
+      .toBeVisible()
+      .withTimeout(5000);
+
+    await setMode('observe');
+    await scrollToTop();
+    const expandedFrame = (await outerNestedAppBarAttributes()).frame;
+
+    await element(by.id(SCROLL_VIEW)).swipe('up', 'slow', 0.9);
+
+    const snapshot = await readSnapshot();
+    const collapsedFrame = (await outerNestedAppBarAttributes()).frame;
+
+    jestExpect(snapshot.lastScreenClass).toBe(
+      'com.swmansion.rnscreens.stack.screen.StackScreen',
+    );
+    jestExpect(snapshot.lastTargetClass).toContain('ReactNestedScrollView');
+    jestExpect(snapshot.touchStarts).toBeGreaterThan(0);
+    jestExpect(snapshot.delegateConsumedPreY).toBe(0);
+    jestExpect(snapshot.delegateConsumedPostY).toBe(0);
+    jestExpect(snapshot.lastTargetScrollY).toBeGreaterThan(0);
+    jestExpect(collapsedFrame.y).toBeLessThan(expandedFrame.y);
+
+    await device.pressBack();
+    await waitForRoute('Home');
   });
 
   it('is behaviorally inert when the external delegate declines nested scroll', async () => {
