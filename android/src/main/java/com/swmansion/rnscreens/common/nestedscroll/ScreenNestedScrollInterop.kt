@@ -7,7 +7,10 @@ import androidx.core.view.NestedScrollingParent3
  * Optional Android nested-scroll participant owned outside react-native-screens.
  *
  * Implementations receive the same AndroidX nested-scroll transaction as the screen container,
- * without react-native-screens depending on the implementation.
+ * without react-native-screens depending on the implementation. This is intentionally separate
+ * from the Container / ContainerItem hierarchy: that hierarchy resolves content through nested
+ * navigation containers, while this contract only forwards a transaction already received by the
+ * owning CoordinatorLayout.
  */
 interface ScreenNestedScrollDelegate : NestedScrollingParent3 {
     fun onScreenAttached(screen: ViewGroup) = Unit
@@ -25,7 +28,8 @@ fun interface ScreenNestedScrollDelegateFactory {
  * Process-wide extension point for optional screen nested-scroll delegates.
  *
  * The default is no delegate, preserving existing react-native-screens behavior. A single
- * external owner may install a factory before screens are created.
+ * external owner may install a factory before screens are created. The screen's own CoordinatorLayout
+ * behaviors always run first; the delegate can consume only the signed distance left afterwards.
  */
 object ScreenNestedScrollInterop {
     @Volatile
