@@ -65,6 +65,11 @@ const HEADER_CONFIG: StackHeaderConfigProps = {
   },
 };
 
+const OUTER_NESTED_HEADER_CONFIG: StackHeaderConfigProps = {
+  ...HEADER_CONFIG,
+  title: 'Outer nested header',
+};
+
 function TestStackNestedScrollInteropAndroid() {
   const [ready, setReady] = useState(false);
 
@@ -106,7 +111,7 @@ function NestedProbeStack() {
   const { routeKey, setRouteOptions } = useStackNavigationContext();
 
   useEffect(() => {
-    setRouteOptions(routeKey, { headerConfig: HEADER_CONFIG });
+    setRouteOptions(routeKey, { headerConfig: OUTER_NESTED_HEADER_CONFIG });
   }, [routeKey, setRouteOptions]);
 
   return (
