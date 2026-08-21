@@ -21,6 +21,7 @@ import { createScenario } from '@apps/tests/shared/helpers';
 import { scenarioDescription } from './scenario-description';
 
 export type ProbeSnapshot = {
+  sequence: number;
   delegatesCreated: number;
   attached: number;
   detached: number;
@@ -123,6 +124,7 @@ function ProbeScreen({ label }: { label: string }) {
   }, []);
 
   const refreshSnapshot = useCallback(async () => {
+    setSnapshot(null);
     setSnapshot(await probe.snapshot());
   }, []);
 
