@@ -3,8 +3,10 @@ package com.swmansion.rnscreens.common.nestedscroll
 import android.content.Context
 import android.view.View
 import android.view.ViewGroup
+import android.view.ViewParent
 import androidx.coordinatorlayout.widget.CoordinatorLayout
 import androidx.core.view.ViewCompat
+import androidx.core.view.ViewParentCompat
 
 /**
  * CoordinatorLayout that preserves its normal child-behavior dispatch and optionally forwards
@@ -14,10 +16,17 @@ internal abstract class ScreenNestedScrollCoordinatorLayout(
     context: Context,
     private val screen: ViewGroup,
 ) : CoordinatorLayout(context) {
+    private data class AncestorBridge(
+        val parent: ViewParent,
+        val target: View,
+    )
+
     private var nestedScrollDelegate: ScreenNestedScrollDelegate? = null
     private val superAcceptedTypes = mutableSetOf<Int>()
     private val delegateAcceptedTypes = mutableSetOf<Int>()
+    private val ancestorBridges = mutableMapOf<Int, AncestorBridge>()
     private val delegateConsumed = IntArray(2)
+    private val ancestorConsumed = IntArray(2)
 
     override fun getNestedScrollAxes(): Int = super.getNestedScrollAxes() or (nestedScrollDelegate?.getNestedScrollAxes() ?: 0)
 
@@ -27,6 +36,8 @@ internal abstract class ScreenNestedScrollCoordinatorLayout(
         axes: Int,
         type: Int,
     ): Boolean {
+        stopAncestorBridge(type)
+
         val superAccepted = super.onStartNestedScroll(child, target, axes, type)
         val delegateAccepted =
             isNearestInteropCoordinatorFor(target) &&
@@ -34,6 +45,14 @@ internal abstract class ScreenNestedScrollCoordinatorLayout(
 
         if (superAccepted) superAcceptedTypes.add(type) else superAcceptedTypes.remove(type)
         if (delegateAccepted) delegateAcceptedTypes.add(type) else delegateAcceptedTypes.remove(type)
+
+        // If the delegate is the only reason this inner coordinator accepts the source, Android
+        // would otherwise stop searching the parent chain here. Preserve the natural parent
+        // priority by bridging the original target to the first ancestor that would have accepted
+        // it, then let the external delegate see only what remains.
+        if (!superAccepted && delegateAccepted) {
+            startAncestorBridge(target, axes, type)
+        }
 
         return superAccepted || delegateAccepted
     }
@@ -59,6 +78,7 @@ internal abstract class ScreenNestedScrollCoordinatorLayout(
         if (type in superAcceptedTypes) {
             super.onStopNestedScroll(target, type)
         }
+        stopAncestorBridge(type)
         if (type in delegateAcceptedTypes) {
             nestedScrollDelegate?.onStopNestedScroll(target, type)
         }
@@ -78,13 +98,15 @@ internal abstract class ScreenNestedScrollCoordinatorLayout(
 
         if (type in superAcceptedTypes) {
             super.onNestedPreScroll(target, dx, dy, consumed, type)
+        } else {
+            dispatchAncestorPreScroll(dx, dy, consumed, type)
         }
 
         if (type in delegateAcceptedTypes) {
-            val consumedBySuperX = consumed[0] - consumedBeforeX
-            val consumedBySuperY = consumed[1] - consumedBeforeY
-            val remainingX = dx - consumedBySuperX
-            val remainingY = dy - consumedBySuperY
+            val consumedByScreensX = consumed[0] - consumedBeforeX
+            val consumedByScreensY = consumed[1] - consumedBeforeY
+            val remainingX = dx - consumedByScreensX
+            val remainingY = dy - consumedByScreensY
             delegateConsumed.fill(0)
 
             nestedScrollDelegate?.onNestedPreScroll(
@@ -122,13 +144,23 @@ internal abstract class ScreenNestedScrollCoordinatorLayout(
                 type,
                 consumed,
             )
+        } else {
+            dispatchAncestorPostScroll(
+                target,
+                dxConsumed,
+                dyConsumed,
+                dxUnconsumed,
+                dyUnconsumed,
+                consumed,
+                type,
+            )
         }
 
         if (type in delegateAcceptedTypes) {
-            val consumedBySuperX = consumed[0] - consumedBeforeX
-            val consumedBySuperY = consumed[1] - consumedBeforeY
-            val remainingX = dxUnconsumed - consumedBySuperX
-            val remainingY = dyUnconsumed - consumedBySuperY
+            val consumedByScreensX = consumed[0] - consumedBeforeX
+            val consumedByScreensY = consumed[1] - consumedBeforeY
+            val remainingX = dxUnconsumed - consumedByScreensX
+            val remainingY = dyUnconsumed - consumedByScreensY
             delegateConsumed.fill(0)
 
             nestedScrollDelegate?.onNestedScroll(
@@ -159,6 +191,20 @@ internal abstract class ScreenNestedScrollCoordinatorLayout(
             return true
         }
 
+        val ancestorConsumed =
+            ancestorBridges[ViewCompat.TYPE_TOUCH]?.let { bridge ->
+                ViewParentCompat.onNestedPreFling(
+                    bridge.parent,
+                    bridge.target,
+                    velocityX,
+                    velocityY,
+                )
+            } == true
+
+        if (ancestorConsumed) {
+            return true
+        }
+
         return ViewCompat.TYPE_TOUCH in delegateAcceptedTypes &&
             nestedScrollDelegate?.onNestedPreFling(target, velocityX, velocityY) == true
     }
@@ -177,6 +223,21 @@ internal abstract class ScreenNestedScrollCoordinatorLayout(
             return true
         }
 
+        val handledByAncestor =
+            ancestorBridges[ViewCompat.TYPE_TOUCH]?.let { bridge ->
+                ViewParentCompat.onNestedFling(
+                    bridge.parent,
+                    bridge.target,
+                    velocityX,
+                    velocityY,
+                    consumed,
+                )
+            } == true
+
+        if (handledByAncestor) {
+            return true
+        }
+
         return ViewCompat.TYPE_TOUCH in delegateAcceptedTypes &&
             nestedScrollDelegate?.onNestedFling(target, velocityX, velocityY, consumed) == true
     }
@@ -188,6 +249,7 @@ internal abstract class ScreenNestedScrollCoordinatorLayout(
     }
 
     override fun onDetachedFromWindow() {
+        ancestorBridges.keys.toList().forEach(::stopAncestorBridge)
         nestedScrollDelegate?.onScreenDetached(screen)
         nestedScrollDelegate = null
         superAcceptedTypes.clear()
@@ -209,8 +271,8 @@ internal abstract class ScreenNestedScrollCoordinatorLayout(
     /**
      * Nested navigation can place more than one screen CoordinatorLayout above the same source.
      * Only the closest one may expose the transaction externally, otherwise the same external
-     * participant would receive the same source movement more than once. Every screens-owned
-     * CoordinatorLayout still runs its normal child behavior regardless of this check.
+     * participant could receive the same source movement more than once. Screens-owned ancestor
+     * behavior is preserved separately through [startAncestorBridge].
      */
     private fun isNearestInteropCoordinatorFor(target: View): Boolean {
         var current: View? = target
@@ -221,6 +283,83 @@ internal abstract class ScreenNestedScrollCoordinatorLayout(
             current = current.parent as? View
         }
         return false
+    }
+
+    /**
+     * Replays Android's normal parent search from this coordinator upward while keeping the
+     * original nested-scroll target. This path is used only when the external delegate caused an
+     * otherwise non-participating inner screen to accept the source.
+     */
+    private fun startAncestorBridge(
+        target: View,
+        axes: Int,
+        type: Int,
+    ) {
+        var directChild: View = this
+        var candidate = parent
+
+        while (candidate != null) {
+            if (ViewParentCompat.onStartNestedScroll(candidate, directChild, target, axes, type)) {
+                ancestorBridges[type] = AncestorBridge(candidate, target)
+                ViewParentCompat.onNestedScrollAccepted(candidate, directChild, target, axes, type)
+                return
+            }
+
+            if (candidate is View) {
+                directChild = candidate
+            }
+            candidate = candidate.parent
+        }
+    }
+
+    private fun stopAncestorBridge(type: Int) {
+        val bridge = ancestorBridges.remove(type) ?: return
+        ViewParentCompat.onStopNestedScroll(bridge.parent, bridge.target, type)
+    }
+
+    private fun dispatchAncestorPreScroll(
+        dx: Int,
+        dy: Int,
+        consumed: IntArray,
+        type: Int,
+    ) {
+        val bridge = ancestorBridges[type] ?: return
+        ancestorConsumed.fill(0)
+        ViewParentCompat.onNestedPreScroll(
+            bridge.parent,
+            bridge.target,
+            dx,
+            dy,
+            ancestorConsumed,
+            type,
+        )
+        consumed[0] += clampSignedConsumption(dx, ancestorConsumed[0])
+        consumed[1] += clampSignedConsumption(dy, ancestorConsumed[1])
+    }
+
+    private fun dispatchAncestorPostScroll(
+        target: View,
+        dxConsumed: Int,
+        dyConsumed: Int,
+        dxUnconsumed: Int,
+        dyUnconsumed: Int,
+        consumed: IntArray,
+        type: Int,
+    ) {
+        val bridge = ancestorBridges[type] ?: return
+        ancestorConsumed.fill(0)
+        ViewParentCompat.onNestedScroll(
+            bridge.parent,
+            target,
+            dxConsumed,
+            dyConsumed,
+            dxUnconsumed,
+            dyUnconsumed,
+            type,
+            ancestorConsumed,
+        )
+        consumed[0] += clampSignedConsumption(dxUnconsumed, ancestorConsumed[0])
+        consumed[1] += clampSignedConsumption(dyUnconsumed, ancestorConsumed[1])
     }
 
     private fun clampSignedConsumption(
