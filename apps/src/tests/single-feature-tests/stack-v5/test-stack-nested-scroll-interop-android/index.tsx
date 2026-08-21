@@ -96,19 +96,47 @@ function TestStackNestedScrollInteropAndroid() {
       routeConfigs={[
         { name: 'Home', element: <ProbeScreen label="Home" /> },
         { name: 'Details', element: <ProbeScreen label="Details" /> },
+        { name: 'Nested', element: <NestedProbeStack /> },
       ]}
     />
   );
 }
 
-function ProbeScreen({ label }: { label: string }) {
+function NestedProbeStack() {
+  const { routeKey, setRouteOptions } = useStackNavigationContext();
+
+  useEffect(() => {
+    setRouteOptions(routeKey, { headerConfig: HEADER_CONFIG });
+  }, [routeKey, setRouteOptions]);
+
+  return (
+    <StackContainer
+      routeConfigs={[
+        {
+          name: 'Inner',
+          element: <ProbeScreen label="Nested" headerEnabled={false} />,
+        },
+      ]}
+    />
+  );
+}
+
+function ProbeScreen({
+  label,
+  headerEnabled = true,
+}: {
+  label: string;
+  headerEnabled?: boolean;
+}) {
   const { routeKey, setRouteOptions, push } = useStackNavigationContext();
   const [snapshot, setSnapshot] = useState<ProbeSnapshot | null>(null);
   const [mode, setMode] = useState<ProbeMode>('observe');
 
   useEffect(() => {
-    setRouteOptions(routeKey, { headerConfig: HEADER_CONFIG });
-  }, [routeKey, setRouteOptions]);
+    setRouteOptions(routeKey, {
+      headerConfig: headerEnabled ? HEADER_CONFIG : undefined,
+    });
+  }, [headerEnabled, routeKey, setRouteOptions]);
 
   const configure = useCallback(async (nextMode: ProbeMode) => {
     const enabled = nextMode !== 'disabled';
@@ -166,11 +194,18 @@ function ProbeScreen({ label }: { label: string }) {
           />
         </View>
         {label === 'Home' ? (
-          <Button
-            testID="nested-scroll-probe-push"
-            title="Push details"
-            onPress={() => push('Details')}
-          />
+          <View style={styles.buttonRow}>
+            <Button
+              testID="nested-scroll-probe-push"
+              title="Push details"
+              onPress={() => push('Details')}
+            />
+            <Button
+              testID="nested-scroll-probe-push-nested"
+              title="Push nested stack"
+              onPress={() => push('Nested')}
+            />
+          </View>
         ) : null}
         <Text
           testID="nested-scroll-probe-snapshot"
