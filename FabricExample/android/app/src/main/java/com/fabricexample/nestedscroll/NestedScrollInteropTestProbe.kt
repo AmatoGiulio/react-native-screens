@@ -10,6 +10,7 @@ import com.swmansion.rnscreens.common.nestedscroll.ScreenNestedScrollInterop
 /** Test-only external consumer used by FabricExample to validate the public nested-scroll seam. */
 object NestedScrollInteropTestProbe : ScreenNestedScrollDelegateFactory {
     data class Snapshot(
+        val sequence: Long,
         val delegatesCreated: Int,
         val attached: Int,
         val detached: Int,
@@ -41,6 +42,7 @@ object NestedScrollInteropTestProbe : ScreenNestedScrollDelegateFactory {
     @Volatile
     private var consumeRemaining = false
 
+    private var snapshotSequence = 0L
     private var delegatesCreated = 0
     private var attached = 0
     private var detached = 0
@@ -101,7 +103,9 @@ object NestedScrollInteropTestProbe : ScreenNestedScrollDelegateFactory {
 
     fun snapshot(): Snapshot =
         synchronized(lock) {
+            snapshotSequence += 1
             Snapshot(
+                sequence = snapshotSequence,
                 delegatesCreated = delegatesCreated,
                 attached = attached,
                 detached = detached,
