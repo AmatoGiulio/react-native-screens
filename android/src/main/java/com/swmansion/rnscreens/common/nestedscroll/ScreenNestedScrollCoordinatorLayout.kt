@@ -14,7 +14,7 @@ internal abstract class ScreenNestedScrollCoordinatorLayout(
     context: Context,
     private val screen: ViewGroup,
 ) : CoordinatorLayout(context) {
-    private val nestedScrollDelegate = ScreenNestedScrollInterop.createDelegate(screen)
+    private var nestedScrollDelegate: ScreenNestedScrollDelegate? = null
     private val superAcceptedTypes = mutableSetOf<Int>()
     private val delegateAcceptedTypes = mutableSetOf<Int>()
     private val delegateConsumed = IntArray(2)
@@ -28,7 +28,9 @@ internal abstract class ScreenNestedScrollCoordinatorLayout(
         type: Int,
     ): Boolean {
         val superAccepted = super.onStartNestedScroll(child, target, axes, type)
-        val delegateAccepted = nestedScrollDelegate?.onStartNestedScroll(child, target, axes, type) == true
+        val delegateAccepted =
+            isNearestInteropCoordinatorFor(target) &&
+                nestedScrollDelegate?.onStartNestedScroll(child, target, axes, type) == true
 
         if (superAccepted) superAcceptedTypes.add(type) else superAcceptedTypes.remove(type)
         if (delegateAccepted) delegateAcceptedTypes.add(type) else delegateAcceptedTypes.remove(type)
@@ -181,11 +183,13 @@ internal abstract class ScreenNestedScrollCoordinatorLayout(
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
+        nestedScrollDelegate = ScreenNestedScrollInterop.createDelegate(screen)
         nestedScrollDelegate?.onScreenAttached(screen)
     }
 
     override fun onDetachedFromWindow() {
         nestedScrollDelegate?.onScreenDetached(screen)
+        nestedScrollDelegate = null
         superAcceptedTypes.clear()
         delegateAcceptedTypes.clear()
         super.onDetachedFromWindow()
@@ -200,6 +204,23 @@ internal abstract class ScreenNestedScrollCoordinatorLayout(
     ) {
         super.onLayout(changed, left, top, right, bottom)
         nestedScrollDelegate?.onScreenLayout(screen)
+    }
+
+    /**
+     * Nested navigation can place more than one screen CoordinatorLayout above the same source.
+     * Only the closest one may expose the transaction externally, otherwise the same external
+     * participant would receive the same source movement more than once. Every screens-owned
+     * CoordinatorLayout still runs its normal child behavior regardless of this check.
+     */
+    private fun isNearestInteropCoordinatorFor(target: View): Boolean {
+        var current: View? = target
+        while (current != null) {
+            if (current is ScreenNestedScrollCoordinatorLayout) {
+                return current === this
+            }
+            current = current.parent as? View
+        }
+        return false
     }
 
     private fun clampSignedConsumption(
