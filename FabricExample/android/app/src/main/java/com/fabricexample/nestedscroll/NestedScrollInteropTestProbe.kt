@@ -133,19 +133,18 @@ object NestedScrollInteropTestProbe : ScreenNestedScrollDelegateFactory {
     override fun create(screen: ViewGroup): ScreenNestedScrollDelegate {
         synchronized(lock) {
             delegatesCreated += 1
-            rememberScreen(screen)
         }
         return ProbeDelegate(screen)
     }
 
     private fun rememberScreen(screen: ViewGroup) {
         lastScreenClass = screen.javaClass.name
-        lastScreenId = screen.id
+        lastScreenId = System.identityHashCode(screen)
     }
 
     private fun rememberTarget(target: View) {
         lastTargetClass = target.javaClass.name
-        lastTargetId = target.id
+        lastTargetId = System.identityHashCode(target)
         lastTargetScrollY = target.scrollY
     }
 
@@ -355,14 +354,12 @@ object NestedScrollInteropTestProbe : ScreenNestedScrollDelegateFactory {
         override fun onScreenAttached(screen: ViewGroup) {
             synchronized(lock) {
                 attached += 1
-                rememberScreen(screen)
             }
         }
 
         override fun onScreenDetached(screen: ViewGroup) {
             synchronized(lock) {
                 detached += 1
-                rememberScreen(screen)
             }
             acceptedTypes.clear()
         }
@@ -370,7 +367,6 @@ object NestedScrollInteropTestProbe : ScreenNestedScrollDelegateFactory {
         override fun onScreenLayout(screen: ViewGroup) {
             synchronized(lock) {
                 layouts += 1
-                rememberScreen(screen)
             }
         }
     }

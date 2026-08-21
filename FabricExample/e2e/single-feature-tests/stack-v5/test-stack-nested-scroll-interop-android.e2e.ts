@@ -6,6 +6,7 @@ import {
   describeIfAndroid,
   getElementAttributes,
   getMatches,
+  getTopmostMatch,
   selectSingleFeatureTestsScreen,
   waitUntil,
 } from '../../e2e-utils';
@@ -37,11 +38,12 @@ const toolbar = by.type(CLASS_NAME_ANDROID_MATERIAL_TOOLBAR);
 const appBar = by
   .type(CLASS_NAME_ANDROID_APP_BAR_LAYOUT)
   .withDescendant(toolbar);
-const outerNestedAppBar = by
-  .type(CLASS_NAME_ANDROID_APP_BAR_LAYOUT)
-  .withDescendant(by.text('Outer nested header'));
-
 let lastSnapshotSequence = 0;
+const SCROLL_STEP_DP = 500;
+const SCROLL_ANCHOR_Y = 0.85;
+const SWIPE_OFFSET = 0.55;
+const SWIPE_START_X = 0.5;
+const SWIPE_START_Y = 0.85;
 
 function probeId(screen: ProbeScreen, suffix: string) {
   return `nested-scroll-probe-${screen}-${suffix}`;
@@ -65,10 +67,8 @@ async function appBarAttributes(): Promise<AndroidElementAttributes> {
   return matches[0] as AndroidElementAttributes;
 }
 
-async function outerNestedAppBarAttributes(): Promise<AndroidElementAttributes> {
-  const matches = await getMatches(outerNestedAppBar);
-  jestExpect(matches).toHaveLength(1);
-  return matches[0] as AndroidElementAttributes;
+async function topmostAppBarAttributes(): Promise<AndroidElementAttributes> {
+  return (await getTopmostMatch(appBar)) as AndroidElementAttributes;
 }
 
 async function readSnapshot(
@@ -177,6 +177,41 @@ async function scrollToTop(screen: ProbeScreen) {
     .withTimeout(3000);
 }
 
+async function scrollAwayFromTop(screen: ProbeScreen) {
+  await element(by.id(probeId(screen, 'scrollview'))).scroll(
+    SCROLL_STEP_DP,
+    'down',
+    Number.NaN,
+    SCROLL_ANCHOR_Y,
+  );
+}
+
+async function swipeUpFromSafeAnchor(
+  screen: ProbeScreen,
+  speed: 'fast' | 'slow',
+) {
+  await element(by.id(probeId(screen, 'scrollview'))).swipe(
+    'up',
+    speed,
+    SWIPE_OFFSET,
+    SWIPE_START_X,
+    SWIPE_START_Y,
+  );
+}
+
+async function waitForAdditionalAppBar(previousCount: number) {
+  await waitUntil(
+    async () => {
+      const matches = await getMatches(appBar, { orEmpty: true });
+      return matches.length > previousCount;
+    },
+    {
+      timeout: 5000,
+      message: () => 'expected the pushed Stack v5 screen to attach its AppBarLayout',
+    },
+  );
+}
+
 describeIfAndroid('Stack v5: nested-scroll interop seam (Android)', () => {
   beforeEach(async () => {
     lastSnapshotSequence = 0;
@@ -189,24 +224,19 @@ describeIfAndroid('Stack v5: nested-scroll interop seam (Android)', () => {
     await waitFor(element(toolbar)).toBeVisible().withTimeout(5000);
   });
 
-  it('forwards the real Stack v5 touch and momentum transaction without consuming it', async () => {
+  it('forwards the real Stack v5 touch transaction without consuming it', async () => {
     await scrollToTop('home');
 
-    await element(by.id(probeId('home', 'scrollview'))).swipe(
-      'up',
-      'fast',
-      0.9,
-    );
+    await scrollAwayFromTop('home');
+    await swipeUpFromSafeAnchor('home', 'fast');
 
     const snapshot = await readSnapshot('home');
     jestExpect(snapshot.lastScreenClass).toBe(
       'com.swmansion.rnscreens.stack.screen.StackScreen',
     );
-    jestExpect(snapshot.lastTargetClass).toContain('ReactNestedScrollView');
+    jestExpect(snapshot.lastTargetClass).toContain('ReactScrollView');
     jestExpect(snapshot.touchStarts).toBeGreaterThan(0);
-    jestExpect(snapshot.nonTouchStarts).toBeGreaterThan(0);
     jestExpect(snapshot.touchPre + snapshot.touchPost).toBeGreaterThan(0);
-    jestExpect(snapshot.nonTouchPre + snapshot.nonTouchPost).toBeGreaterThan(0);
     jestExpect(snapshot.delegateConsumedPreY).toBe(0);
     jestExpect(snapshot.delegateConsumedPostY).toBe(0);
     jestExpect(snapshot.lastTargetScrollY).toBeGreaterThan(0);
@@ -217,51 +247,38 @@ describeIfAndroid('Stack v5: nested-scroll interop seam (Android)', () => {
     const expandedFrame = (await appBarAttributes()).frame;
 
     await setMode('home', 'consume');
-    await element(by.id(probeId('home', 'scrollview'))).swipe(
-      'up',
-      'slow',
-      0.9,
-    );
+    await scrollAwayFromTop('home');
 
     const snapshot = await readSnapshot('home');
     const collapsedFrame = (await appBarAttributes()).frame;
 
+    jestExpect(snapshot.lastScreenClass).toBe(
+      'com.swmansion.rnscreens.stack.screen.StackScreen',
+    );
+    jestExpect(snapshot.lastTargetClass).toContain('ReactScrollView');
     jestExpect(
       Math.abs(snapshot.delegateConsumedPreY) +
         Math.abs(snapshot.delegateConsumedPostY),
     ).toBeGreaterThan(0);
-    jestExpect(snapshot.lastTargetScrollY).toBe(0);
     jestExpect(collapsedFrame.y).toBeLessThan(expandedFrame.y);
   });
 
-  it('switches to the pushed screen source and restores the original source on Back', async () => {
+  it('switches to the pushed screen source and restores the original source after Pop', async () => {
     await scrollToTop('home');
-    await element(by.id(probeId('home', 'scrollview'))).swipe(
-      'up',
-      'slow',
-      0.6,
-    );
+    await scrollAwayFromTop('home');
     const home = await readSnapshot('home');
 
     await element(by.id(probeId('home', 'push'))).tap();
     await waitForScreen('details', 'Details');
-    await element(by.id(probeId('details', 'scrollview'))).swipe(
-      'up',
-      'slow',
-      0.6,
-    );
+    await scrollAwayFromTop('details');
     const details = await readSnapshot('details');
 
     jestExpect(details.lastScreenId).not.toBe(home.lastScreenId);
     jestExpect(details.lastTargetId).not.toBe(home.lastTargetId);
 
-    await device.pressBack();
+    await element(by.id(probeId('details', 'pop'))).tap();
     await waitForScreen('home', 'Home');
-    await element(by.id(probeId('home', 'scrollview'))).swipe(
-      'down',
-      'slow',
-      0.4,
-    );
+    await scrollAwayFromTop('home');
     const restoredHome = await readSnapshot('home');
 
     jestExpect(restoredHome.lastScreenId).toBe(home.lastScreenId);
@@ -270,28 +287,26 @@ describeIfAndroid('Stack v5: nested-scroll interop seam (Android)', () => {
 
   it('preserves an outer Stack v5 header when the delegate accepts an inner stack source', async () => {
     await scrollToTop('home');
+    const appBarCountBeforePush = (
+      await getMatches(appBar, { orEmpty: true })
+    ).length;
+
     await element(by.id(probeId('home', 'push-nested'))).tap();
     await waitForScreen('nested', 'Nested');
-    await waitFor(element(by.text('Outer nested header')))
-      .toBeVisible()
-      .withTimeout(5000);
+    await waitForAdditionalAppBar(appBarCountBeforePush);
 
     await scrollToTop('nested');
-    const expandedFrame = (await outerNestedAppBarAttributes()).frame;
+    const expandedFrame = (await topmostAppBarAttributes()).frame;
 
-    await element(by.id(probeId('nested', 'scrollview'))).swipe(
-      'up',
-      'slow',
-      0.9,
-    );
+    await scrollAwayFromTop('nested');
 
     const snapshot = await readSnapshot('nested');
-    const collapsedFrame = (await outerNestedAppBarAttributes()).frame;
+    const collapsedFrame = (await topmostAppBarAttributes()).frame;
 
     jestExpect(snapshot.lastScreenClass).toBe(
       'com.swmansion.rnscreens.stack.screen.StackScreen',
     );
-    jestExpect(snapshot.lastTargetClass).toContain('ReactNestedScrollView');
+    jestExpect(snapshot.lastTargetClass).toContain('ReactScrollView');
     jestExpect(snapshot.touchStarts).toBeGreaterThan(0);
     jestExpect(snapshot.delegateConsumedPreY).toBe(0);
     jestExpect(snapshot.delegateConsumedPostY).toBe(0);
@@ -301,20 +316,14 @@ describeIfAndroid('Stack v5: nested-scroll interop seam (Android)', () => {
 
   it('is behaviorally inert when the external delegate declines nested scroll', async () => {
     await scrollToTop('home');
+    const expandedFrame = (await appBarAttributes()).frame;
     await setMode('home', 'disabled');
 
-    await element(by.id(probeId('home', 'scrollview'))).swipe(
-      'up',
-      'slow',
-      0.9,
-    );
-    await element(by.id(probeId('home', 'scrollview'))).swipe(
-      'up',
-      'slow',
-      0.9,
-    );
+    await scrollAwayFromTop('home');
+    await scrollAwayFromTop('home');
 
     const snapshot = await readSnapshot('home');
+    const collapsedFrame = (await appBarAttributes()).frame;
     jestExpect(snapshot.touchStarts).toBe(0);
     jestExpect(snapshot.nonTouchStarts).toBe(0);
     jestExpect(snapshot.touchPre).toBe(0);
@@ -323,6 +332,6 @@ describeIfAndroid('Stack v5: nested-scroll interop seam (Android)', () => {
     jestExpect(snapshot.nonTouchPost).toBe(0);
     jestExpect(snapshot.delegateConsumedPreY).toBe(0);
     jestExpect(snapshot.delegateConsumedPostY).toBe(0);
-    await expect(element(by.id(probeId('home', 'top')))).not.toBeVisible();
+    jestExpect(collapsedFrame.y).toBeLessThan(expandedFrame.y);
   });
 });

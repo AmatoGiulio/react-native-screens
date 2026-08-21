@@ -139,7 +139,7 @@ function ProbeScreen({
   label: ProbeScreenLabel;
   headerEnabled?: boolean;
 }) {
-  const { routeKey, setRouteOptions, push } = useStackNavigationContext();
+  const { routeKey, setRouteOptions, push, pop } = useStackNavigationContext();
   const [snapshot, setSnapshot] = useState<ProbeSnapshot | null>(null);
   const [snapshotState, setSnapshotState] = useState<SnapshotState>('idle');
   const [mode, setMode] = useState<ProbeMode>('observe');
@@ -257,6 +257,15 @@ function ProbeScreen({
               testID={`${prefix}-push-nested`}
               title="Push nested stack"
               onPress={() => push('Nested')}
+            />
+          </View>
+        ) : null}
+        {label === 'Details' ? (
+          <View style={styles.buttonRow}>
+            <Button
+              testID={`${prefix}-pop`}
+              title="Pop"
+              onPress={() => pop(routeKey)}
             />
           </View>
         ) : null}
